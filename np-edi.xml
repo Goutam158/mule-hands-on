@@ -1,0 +1,523 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:x12="http://www.mulesoft.org/schema/mule/x12"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/x12 http://www.mulesoft.org/schema/mule/x12/current/mule-x12.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
+	<file:config name="File_Config" doc:name="File Config" doc:id="7a8ac6d7-c7e0-47d0-aa25-504446d80e71" >
+	<!-- 	<file:connection workingDir="C:\Users\gd518595\Downloads\NaturesPath\edi_sample\852" /> -->
+	<file:connection workingDir="C:\Users\gd518595" />
+	</file:config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="90712128-3d24-4dd0-a85c-6c9949457d9d" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<x12:config name="X12_EDI_Config" doc:name="X12 EDI Config" doc:id="4d32b998-f85b-46a2-856c-4ebcd65ca06c" requireUniqueInterchanges="false"  stringCharacterSet="UNRESTRICTED">
+		<!-- <x12:schemas >
+			<x12:schema value="855_custom.esl" />
+		</x12:schemas> -->
+	</x12:config>
+	<flow name="np-ediFlow" doc:id="3e12debc-49ed-4774-a39d-13a3bce81edd" >
+		 <!-- <file:listener doc:name="On New or Updated File" doc:id="3de82810-8dc8-4ad8-b069-4e89b616efe7" config-ref="File_Config">
+			<scheduling-strategy >
+				<fixed-frequency frequency="30" timeUnit="SECONDS"/>
+			</scheduling-strategy>
+		</file:listener>  -->
+		
+		<http:listener doc:name="Listener" doc:id="eb1a9797-d830-44ce-960a-9a80e45413c7" config-ref="HTTP_Listener_config" path="/edi" allowedMethods="POST"/>
+		<logger level="INFO" doc:name="Logger" doc:id="73cd1feb-c097-4cb3-8d9b-11fb7b3af956" message="Request received with Correlation ID : #[correlationId] and payload is :: #[payload]"/>
+		
+		<x12:read doc:name="Read" doc:id="e7bd3aa8-21c1-4f29-96fd-907edb96de80" config-ref="X12_EDI_Config"/>
+		<set-variable value='#[%dw 2.0&#10;output application/java&#10;---&#10;payload."TransactionSets"."v004010"."852"[0]."Heading"]' doc:name=" Variable_Headers" doc:id="7e5f91dd-72d3-41bf-aad5-4f7fdc3a86b8" variableName="vars_headers"/>
+		
+	
+		<ee:transform doc:name="Transform Message" doc:id="03948ca0-1a8b-45f2-bd38-919efc3e403e" >
+			
+			<ee:variables >
+				<!-- <ee:set-variable variableName="vars_headers" ><![CDATA[%dw 2.0
+output application/java
+-&#45;&#45;
+payload."TransactionSets"."v004010"."852"[0]."Heading"]]></ee:set-variable>
+ -->
+
+				<ee:set-variable variableName="header_segment_csv" ><![CDATA[%dw 2.0
+output application/csv header= true  , separator=",", quoteValues=true
+---
+{
+         "Level" : "Header",
+		"Transaction_date" : vars.vars_headers."020_XQ"."XQ02"  as Date,
+		"Ship_To_Name" :  if (vars.vars_headers."060_N1_Loop"[0]."060_N1"."N101" == "ST" ) ((vars.vars_headers."060_N1_Loop"[0]."060_N1"."N102") replace "\\" with "") as String else "",
+		"Ship_To_DUNS_Number" : if (vars.vars_headers."060_N1_Loop"[0]."060_N1"."N101" == "ST" ) vars.vars_headers."060_N1_Loop"[0]."060_N1"."N104" as String else "",
+		"Vendor_name" : if (vars.vars_headers."060_N1_Loop"[1]."060_N1"."N101" == "VN" ) ((vars.vars_headers."060_N1_Loop"[1]."060_N1"."N102") replace "\\" with "") as String else "",
+		"Vendor_DUNS_Number" : if (vars.vars_headers."060_N1_Loop"[1]."060_N1"."N101" == "VN" ) vars.vars_headers."060_N1_Loop"[1]."060_N1"."N104" as String  else "",
+		"Process_Date" : if (vars.vars_headers."060_N1_Loop"[1]."120_DTM"[0]."DTM01" == "009" ) vars.vars_headers."060_N1_Loop"[1]."120_DTM"[0]."DTM02" as Date else ""
+}
+
+]]></ee:set-variable>
+
+
+<ee:set-variable variableName="line_segment_header_csv" ><![CDATA[%dw 2.0
+		
+		
+		output application/csv header= true  , separator=",", quoteValues=true
+		---
+		
+		{
+		        "Level" : "Level",
+		        "Line_number" : "Line_number",
+				"UPC_Case_codes" : "UPC_Case_codes",
+				"Pack" : "Pack",
+				"Size" : "Size",
+				"Unit_of_Measure" :"Unit_of_Measure"
+		}
+
+]]></ee:set-variable>
+
+
+  <ee:set-variable variableName="line_segment_csv" ><![CDATA[%dw 2.0
+		import java!java::util::concurrent::atomic::AtomicInteger
+		var counter = AtomicInteger::new(0)
+		fun increment() = Java::invoke('java.util.concurrent.atomic.AtomicInteger', 'incrementAndGet()', counter, {})
+		
+		output application/csv header= true  , separator=",", quoteValues=true
+		---
+		payload."TransactionSets"."v004010"."852"[0]."Detail"."010_LIN_Loop" map ((value,index) -> 
+		
+		{
+		         "Level" : "Line",
+		         "Line_number" : increment(),
+				"UPC_Case_codes" : if(value."010_LIN"."LIN02" == "UA") value."010_LIN"."LIN03"  else "",
+				"Pack" : if(value."030_PO4"."PO401" != null ) value."030_PO4"."PO401"  else "",
+				"Size" : if(value."030_PO4"."PO402" != null ) value."030_PO4"."PO402"  else "",
+				"Unit_of_Measure" :if(value."030_PO4"."PO403" != null ) value."030_PO4"."PO403"  else ""
+		})
+
+]]></ee:set-variable>
+
+
+<ee:set-variable variableName="subline_segment_header_csv" ><![CDATA[%dw 2.0
+		
+		
+		output application/csv header= true  , separator=",", quoteValues=true
+		---
+		
+		
+		{
+			"Level" : "Level",        
+			"Activity_Code": "Activity_Code",
+			"Quantity" : "Quantity" ,
+			"Unit_of_Measure" : "Unit_of_Measure" ,
+			"Date_ID_Qualifier" :"Date_ID_Qualifier",
+			"Date" : "Date" ,
+			"Reference_ID": "Reference_ID",
+			"Reference": "Reference"
+		}
+
+]]></ee:set-variable>
+
+    <ee:set-variable variableName="subline_segment_csv" ><![CDATA[%dw 2.0
+		
+			fun dateIdQualifier (val : String ) = if (val == "004") "Purchase Order" 
+	                                       else 
+	                                      if(val == "015") "Promotion Start" 
+	                                           else 
+	                                      if(val == "016") "Promotion End" 
+	                                           else ""  
+                                           
+			fun referenceId (val : String ) = if (val == "PO") "Purchase Order Number" 
+			                                       else 
+			                                      if(val == "ZZ") "Mutually Defined" 
+			                                           else ""
+			                                           
+			fun activityCode (val : String ) = if (val == "QA") "Current Inventory (Onhand)" 
+			                                       else 
+			                                      if(val == "QD") "Additional Demand by Date" 
+			                                           else 
+			                                       if(val == "QO") "Out of Stocks" 
+			                                         else 
+			                                       if(val == "QP") "On Order by PO" 
+			                                         else 
+			                                        if(val == "QS") "Turn or Combined Sales" 
+			                                           else 
+			                                        if(val == "QT") "Promotiona Sales" 
+			                                           else ""       
+			
+			output application/csv  separator=",", quoteValues=true
+
+		---
+		flatten(payload."TransactionSets"."v004010"."852"[0]."Detail"."010_LIN_Loop"."080_ZA_Loop") map ((value,index) -> 
+		
+		{
+			"Level" : "SubLine",        
+			"Activity_Code": if(value."080_ZA"."ZA01" != null) activityCode(value."080_ZA"."ZA01") else "",
+			"Quantity" : if(value."080_ZA"."ZA02" != null) value."080_ZA"."ZA02" else "" ,
+			"Unit_of_Measure" : if(value."080_ZA"."ZA03" != null) value."080_ZA"."ZA03" else "" ,
+			"Date_ID_Qualifier" :if(value."080_ZA"."ZA04" != null) dateIdQualifier(value."080_ZA"."ZA04") else "" ,
+			"Date" : if(value."080_ZA"."ZA05" != null) value."080_ZA"."ZA05" as Date else "" ,
+			"Reference_ID": if(value."080_ZA"."ZA06" != null) referenceId(value."080_ZA"."ZA06") else "",
+			"Reference": if(value."080_ZA"."ZA07" != null) (value."080_ZA"."ZA07") else ""
+		})
+
+]]></ee:set-variable>
+
+			</ee:variables>
+		</ee:transform>
+		 
+		 <ee:transform doc:name="Aggregate All CSVs" doc:id="1632db99-fa0f-446a-888f-aa7b5efffa5c" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+				
+output application/csv  separator=",", quoteValues=true
+
+
+---
+
+(vars.header_segment_csv default []) ++ (vars.line_segment_header_csv  default []) ++ (vars.line_segment_csv  default [])
+   ++ (vars.subline_segment_header_csv  default []) ++ (vars.subline_segment_csv  default [])
+		
+		
+		
+]]></ee:set-payload>
+			
+</ee:message>
+		</ee:transform>
+		 
+		<!-- <ee:transform doc:name="Transform Message" doc:id="8b9385e9-18a5-41d1-a06d-25e7d0f65c19" >
+			<ee:message >
+				<ee:set-payload resource="generate_combine_csv.dwl" />
+			</ee:message>
+		</ee:transform> -->
+		<logger level="INFO" doc:name="Logger" doc:id="29c6fec7-2c07-4096-88d9-3e2ac3233d60" message=" Transformed payload :: #[payload]"/>
+		
+		<file:write doc:name="Write" doc:id="2df74a19-15af-4248-90fa-65e36c62ffe0"  config-ref="File_Config" path="demo_aggregated_cswg.csv"/>
+	</flow>
+	
+	<flow name="np-edi-writeFlow" doc:id="571eff9b-d73d-4522-b843-d64a1d291bec" >
+		 <!-- <file:listener doc:name="On New or Updated File" doc:id="76edf020-8138-4399-bc2f-0d93634386d3" config-ref="File_Config">
+			<scheduling-strategy >
+				<fixed-frequency frequency="30" timeUnit="SECONDS"/>
+			</scheduling-strategy>
+		</file:listener>  -->
+		
+		<http:listener doc:name="Listener" doc:id="398501c6-be74-4450-89d5-3ad99d42a65e" config-ref="HTTP_Listener_config" path="/edi-write" allowedMethods="POST"/>
+		<ee:transform doc:name="Transform Message" doc:id="83f2b114-fcde-408d-936c-a3d68629b88e" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+{
+    "Errors": [],
+    "Delimiters": "*>|~",
+    "TransactionSets": {
+        "v005010": {
+            "855": [
+                {
+                    "Interchange": {
+                        "ISA09": "2021-04-06T00:00:00+05:30" as Date,
+                        "ISA04": "",
+                        "ISA15": "P",
+                        "ISA03": "00",
+                        "ISA14": "0",
+                        "ISA02": "",
+                        "ISA13": 100001211,
+                        "ISA01": "00",
+                        "ISA12": "00501",
+                        "ISA08": "IHERB",
+                        "ISA07": "ZZ",
+                        "ISA06": "NPPROD",
+                        "ISA05": "ZZ",
+                        "ISA16": ">",
+                        "ISA11": "|",
+                        "ISA10": 59400000
+                    },
+                    "Group": {
+                        "GS05": 59400000,
+                        "GS04": "2021-04-06T00:00:00+05:30" as Date,
+                        "GS07": "T",
+                        "GS06": 100001211,
+                        "GS08": "005010",
+                        "GS01": "PR",
+                        "GS03": "IHERB",
+                        "GS02": "NPPROD"
+                    },
+                    "Heading": {
+                        "0500_REF": [
+                            {
+                                "REF02": "74260248",
+                                "REF01": "IA"
+                            }
+                        ],
+                        "0200_BAK": {
+                            "BAK04": "2021-04-06T00:00:00+05:30" as Date,
+                            "BAK09": "2021-04-06T00:00:00+05:30" as Date,
+                            "BAK01": "00",
+                            "BAK02": "AD",
+                            "BAK03": "509160"
+                        },
+                        "1500_DTM": [
+                            {
+                                "DTM02": "2021-04-19T00:00:00+05:30" as Date,
+                                "DTM01": "067"
+                            }
+                        ],
+                        "3000_N1_Loop": [
+                            {
+                                "3300_N4": {
+                                    "N401": "HEBRON",
+                                    "N402": "KY",
+                                    "N403": "41048"
+                                },
+                                "3000_N1": {
+                                    "N101": "ST",
+                                    "N102": "IHERB LLC"
+                                },
+                                "3200_N3": [
+                                    {
+                                        "N301": "1765 WORLDWIDE BLVD."
+                                    }
+                                ]
+                            },
+                            {
+                                "3300_N4": {
+                                    "N401": "RICHMOND",
+                                    "N402": "BC",
+                                    "N403": "V6X 1W3"
+                                },
+                                "3000_N1": {
+                                    "N101": "VN",
+                                    "N102": "NATURE'S PATH FOOD INC"
+                                },
+                                "3200_N3": [
+                                    {
+                                        "N301": "9100 VAN HORNE WAY"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "SetTrailer": {
+                        "SE02": "0001",
+                        "SE01": 21
+                    },
+                    "Summary": {
+                        "0100_CTT_Loop": {
+                            "0100_CTT": {
+                                "CTT01": 3
+                            }
+                        }
+                    },
+                    "Id": "855",
+                    "SetHeader": {
+                        "ST01": "855",
+                        "ST02": "0001"
+                    },
+                    "Detail": {
+                        "0100_PO1_Loop": [
+                            {
+                                "2700_ACK_Loop": [
+                                    {
+                                        "2700_ACK": {
+                                            "ACK02": 27,
+                                            "ACK01": "IA",
+                                            "ACK05": "2021-04-19T00:00:00+05:30" as Date,
+                                            "ACK04": "067",
+                                            "ACK03": "EA"
+                                        }
+                                    }
+                                ],
+                                "0500_PID_Loop": [
+                                    {
+                                        "0500_PID": {
+                                            "PID02": "08",
+                                            "PID01": "F",
+                                            "PID05": "NP EK PANDA PUFFS USA BOX 10.6oz"
+                                        }
+                                    }
+                                ],
+                                "0100_PO1": {
+                                    "PO109": "058449860044",
+                                    "PO108": "BP",
+                                    "PO107": "058449860044",
+                                    "PO106": "UP",
+                                    "PO101": "1",
+                                    "PO111": "86004U",
+                                    "PO110": "VN",
+                                    "PO104": 33.72,
+                                    "PO103": "EA",
+                                    "PO102": 27
+                                }
+                            },
+                            {
+                                "2700_ACK_Loop": [
+                                    {
+                                        "2700_ACK": {
+                                            "ACK02": 54,
+                                            "ACK01": "IA",
+                                            "ACK05": "2021-04-19T00:00:00+05:30" as Date,
+                                            "ACK04": "067",
+                                            "ACK03": "EA"
+                                        }
+                                    }
+                                ],
+                                "0500_PID_Loop": [
+                                    {
+                                        "0500_PID": {
+                                            "PID02": "08",
+                                            "PID01": "F",
+                                            "PID05": "NP EK CHOCO CHIMPS 284g USA"
+                                        }
+                                    }
+                                ],
+                                "0100_PO1": {
+                                    "PO109": "058449870241",
+                                    "PO108": "BP",
+                                    "PO107": "058449870241",
+                                    "PO106": "UP",
+                                    "PO101": "2",
+                                    "PO111": "87024U",
+                                    "PO110": "VN",
+                                    "PO104": 33.72,
+                                    "PO103": "EA",
+                                    "PO102": 54
+                                }
+                            },
+                            {
+                                "2700_ACK_Loop": [
+                                    {
+                                        "2700_ACK": {
+                                            "ACK02": 12,
+                                            "ACK01": "IA",
+                                            "ACK05": "2021-04-19T00:00:00+05:30" as Date,
+                                            "ACK04": "067",
+                                            "ACK03": "EA"
+                                        }
+                                    }
+                                ],
+                                "0500_PID_Loop": [
+                                    {
+                                        "0500_PID": {
+                                            "PID02": "08",
+                                            "PID01": "F",
+                                            "PID05": "NP FLAX VANILLA ALMOND GRNL USA"
+                                        }
+                                    }
+                                ],
+                                "0100_PO1": {
+                                    "PO109": "058449890256",
+                                    "PO108": "BP",
+                                    "PO107": "058449890256",
+                                    "PO106": "UP",
+                                    "PO101": "3",
+                                    "PO111": "89025U",
+                                    "PO110": "VN",
+                                    "PO104": 33.24,
+                                    "PO103": "EA",
+                                    "PO102": 12
+                                }
+                            }
+                        ]
+                    },
+                    "Name": "Purchase Order Acknowledgment"
+                }
+            ]
+        }
+    },
+    "FunctionalAcksGenerated": [
+        {
+            "Interchange": {
+                "ISA09": "2021-04-06T00:00:00+05:30" as Date,
+                "ISA04": "",
+                "ISA15": "P",
+                "ISA03": "00",
+                "ISA14": "0",
+                "ISA02": "",
+                "ISA13": 100001211,
+                "ISA01": "00",
+                "ISA12": "00501",
+                "ISA08": "NPPROD",
+                "ISA07": "ZZ",
+                "ISA06": "IHERB",
+                "ISA05": "ZZ",
+                "ISA16": ">",
+                "ISA11": "|",
+                "ISA10": 59400000
+            },
+            "Group": {
+                "GS05": 59400000,
+                "GS04": "2021-04-06T00:00:00+05:30" as Date,
+                "GS07": "X",
+                "GS06": 100001211,
+                "GS08": "005010",
+                "GS01": "PR",
+                "GS03": "NPPROD",
+                "GS02": "IHERB"
+            },
+            "Heading": {
+                "0200_AK1": {
+                    "AK103": "005010",
+                    "AK101": "PR",
+                    "AK102": 100001211
+                },
+                "0700_AK9": {
+                    "AK903": 1,
+                    "AK904": 1,
+                    "AK901": "A",
+                    "AK902": 1
+                }
+            },
+            "Id": "997",
+            "Name": "Functional Acknowledgment"
+        }
+    ],
+    "InterchangeAcksGenerated": [
+        {
+            "Interchange": {
+                "ISA09": "2021-04-06T00:00:00+05:30" as Date,
+                "ISA04": "",
+                "ISA15": "P",
+                "ISA03": "00",
+                "ISA14": "0",
+                "ISA02": "",
+                "ISA13": 100001211,
+                "ISA01": "00",
+                "ISA12": "00501",
+                "ISA08": "NPPROD",
+                "ISA07": "ZZ",
+                "ISA06": "IHERB",
+                "ISA05": "ZZ",
+                "ISA16": ">",
+                "ISA11": "|",
+                "ISA10": 59400000
+            },
+            "TA104": "A",
+            "TA105": "000",
+            "TA102": "2021-04-06T00:00:00+05:30" as Date,
+            "TA103": 59400000,
+            "TA101": 100001211
+        }
+    ]
+}
+ ]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="9ad4918c-5d89-47e8-bdba-0bff98509318" message="Request received with Correlation ID : #[correlationId] and payload is :: #[payload]"/>
+		
+		 
+		<x12:write doc:name="Write" doc:id="69f30fa1-dedc-4ae4-af34-5a74779c3620" config-ref="X12_EDI_Config"/>
+		<ee:transform doc:name="Transform Message" doc:id="7cd91c6e-9aa0-4b50-8435-168ce443319f" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output text/plain
+---
+payload as String]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		 
+		<logger level="INFO" doc:name="Logger" doc:id="87ca79a5-5947-4bb6-a278-062fb4124d6e" message=" Transformed payload :: #[payload]"/>
+		<file:write doc:name="Write" doc:id="9e183f03-0af1-49ad-ae47-a18514dd29ba"  config-ref="File_Config" path="demo.txt"/>
+	
+</flow>
+	
+</mule>

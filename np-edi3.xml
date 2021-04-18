@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:x12="http://www.mulesoft.org/schema/mule/x12"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/x12 http://www.mulesoft.org/schema/mule/x12/current/mule-x12.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd">
+	
+	
+	
+	<flow name="np-edi-3Flow" doc:id="6daa0eb8-c87a-4411-a8d7-d2e6562643c1" >
+		 <!-- <file:listener doc:name="On New or Updated File" doc:id="7d455849-f2bf-4623-8e03-4fdaf9bfd440" config-ref="File_Config">
+			<scheduling-strategy >
+				<fixed-frequency frequency="30" timeUnit="SECONDS"/>
+			</scheduling-strategy>
+		</file:listener>  -->
+		
+		<http:listener doc:name="Listener" doc:id="806f9656-8608-47fa-8df1-4db313b6fb34" config-ref="HTTP_Listener_config" path="/edi-csv" allowedMethods="POST"/>
+		<logger level="INFO" doc:name="Logger" doc:id="6fbb6191-2f74-44d7-986f-4895c1de9e87" message="Request received with Correlation ID : #[correlationId] and payload is :: #[payload]"/>
+		
+		<x12:read doc:name="Read" doc:id="0ee5995f-5d8c-4c88-b658-3111e1dbed20" config-ref="X12_EDI_Config"/>
+		<set-variable value='#[%dw 2.0
+&#10;output application/java
+&#10;---
+&#10;payload."TransactionSets"."v004010"."852"[0]."Heading"]' doc:name="Variable_Headers" doc:id="322f1d12-8ebf-4fe3-8ca5-ee927aa5fb4b" variableName="vars_headers"/>
+		
+		<set-variable value='#[[]]' doc:name="Variable_initial_csv" doc:id="b6f16ba1-acb2-4b9e-bf56-1f22743ee57e" variableName="initial_csv"/>
+		
+		<set-variable value='#[%dw 2.0&#10;&#10;output application/java&#10;&#10;---&#10;&#10; (payload."TransactionSets"."v004010"."852"[0]."Detail"."010_LIN_Loop")]' doc:name="Variable_Line_Items" doc:id="d4dd1fd8-ec3e-4c59-a2e7-c7fe55d9c6b7" variableName="line_items"/>
+		
+		<set-variable value='#[%dw 2.0&#10;&#10;output application/java&#10;&#10;---&#10;&#10; sizeOf(payload."TransactionSets"."v004010"."852"[0]."Detail"."010_LIN_Loop")]' doc:name="Variable_Line_Items_count" doc:id="fdfac41f-9c37-4206-8066-4022e93ac7e4" variableName="line_items_count"/>
+		
+			<set-variable variableName="global_counter"  value = '#[%dw 2.0&#10;			     
+			 import java!java::util::concurrent::atomic::AtomicInteger&#10;				 
+			  var counter = AtomicInteger::new(0)&#10;			
+			  	output application/java &#10;			
+			  		---&#10;				
+			  Java::invoke("java.util.concurrent.atomic.AtomicInteger", "incrementAndGet()", counter, {})]'/>
+			
+						
+					<set-variable variableName="header_segment_csv"  value = '#[%dw 2.0&#10;				output application/java &#10;				---&#10;				{&#10;				         "Level" : "Header",&#10;						"Transaction_date" : vars.vars_headers."020_XQ"."XQ02"  as Date,&#10;						"Ship_To_Name" :  if (vars.vars_headers."060_N1_Loop"[0]."060_N1"."N101" == "ST" ) ((vars.vars_headers."060_N1_Loop"[0]."060_N1"."N102") replace "\\" with "") as String else "",&#10;						"Ship_To_DUNS_Number" : if (vars.vars_headers."060_N1_Loop"[0]."060_N1"."N101" == "ST" ) vars.vars_headers."060_N1_Loop"[0]."060_N1"."N104" as String else "",&#10;						"Vendor_name" : if (vars.vars_headers."060_N1_Loop"[1]."060_N1"."N101" == "VN" ) ((vars.vars_headers."060_N1_Loop"[1]."060_N1"."N102") replace "\\" with "") as String else "",&#10;						"Vendor_DUNS_Number" : if (vars.vars_headers."060_N1_Loop"[1]."060_N1"."N101" == "VN" ) vars.vars_headers."060_N1_Loop"[1]."060_N1"."N104" as String  else "",&#10;						"Process_Date" : if (vars.vars_headers."060_N1_Loop"[1]."120_DTM"[0]."DTM01" == "009" ) vars.vars_headers."060_N1_Loop"[1]."120_DTM"[0]."DTM02" as Date else ""&#10;				}]'/>
+				
+		     <set-variable variableName="initial_csv"  value= '#[%dw 2.0&#10;					&#10;					output application/java &#10;					---&#10;					  vars.initial_csv + (vars.header_segment_csv)]'/>
+			 
+<foreach doc:name="For Each LineItems"  doc:id="f303ca10-0c3a-4247-ac09-4fd2769845a8"  collection="#[vars.line_items]" counterVariableName="parentCounter">
+
+
+		 <set-variable variableName="line_segment_header_csv" value= '#[%dw 2.0
+					
+					
+					output application/java 
+					---
+					
+					{
+					        "Level" : "Level",
+					        "Line_number" : "Line_number",
+							"UPC_Case_codes" : "UPC_Case_codes",
+							"Pack" : "Pack",
+							"Size" : "Size",
+							"Unit_of_Measure" :"Unit_of_Measure"
+					}
+			
+			]'/>
+			
+			
+			  <set-variable variableName="line_segment_csv" value='#[%dw 2.0
+					
+					var value = payload
+					output application/java 
+					
+					---
+					
+					
+					{
+					         "Level" : "Line",
+					         "Line_number" : vars.parentCounter,
+							"UPC_Case_codes" : if(value."010_LIN"."LIN02" == "UA") value."010_LIN"."LIN03"  else "",
+							"Pack" : if(value."030_PO4"."PO401" != null ) value."030_PO4"."PO401"  else "",
+							"Size" : if(value."030_PO4"."PO402" != null ) value."030_PO4"."PO402"  else "",
+							"Unit_of_Measure" :if(value."030_PO4"."PO403" != null ) value."030_PO4"."PO403"  else ""
+					}
+			
+			]'/>
+			
+			<set-variable variableName="subline_items" value='#[%dw 2.0
+					
+					var value = payload."080_ZA_Loop"
+					output application/java 
+					---
+                     value					
+			
+			       ]'/>
+			       
+			
+			<set-variable variableName="subline_segment_header_csv" value='#[%dw 2.0
+							
+							
+							output application/java 
+							---
+							
+							
+							{
+								"Level" : "Level",        
+								"Activity_Code": "Activity_Code",
+								"Quantity" : "Quantity" ,
+								"Unit_of_Measure" : "Unit_of_Measure" ,
+								"Date_ID_Qualifier" :"Date_ID_Qualifier",
+								"Date" : "Date" ,
+								"Reference_ID": "Reference_ID",
+								"Reference": "Reference"
+							}
+					
+					]'/>
+					
+			<set-variable variableName="initial_csv" value='#[%dw 2.0
+					
+					output application/java 
+					---
+					  vars.initial_csv  + (vars.line_segment_header_csv  ) + (vars.line_segment_csv )
+					          + (vars.subline_segment_header_csv )
+					
+			       ]'/>
+			
+			
+			<foreach doc:name="For Each SubLineItems"  doc:id="d9ffe118-a369-48e5-9408-ee4b68d1ea3e"  collection="#[vars.subline_items]" counterVariableName="nestedCounter">		
+					
+					
+					    <set-variable variableName="subline_segment_csv" value='#[%dw 2.0
+							
+								fun dateIdQualifier (val : String ) = if (val == "004") "Purchase Order" 
+						                                       else 
+						                                      if(val == "015") "Promotion Start" 
+						                                           else 
+						                                      if(val == "016") "Promotion End" 
+						                                           else ""  
+					                                           
+								fun referenceId (val : String ) = if (val == "PO") "Purchase Order Number" 
+								                                       else 
+								                                      if(val == "ZZ") "Mutually Defined" 
+								                                           else ""
+								                                           
+								fun activityCode (val : String ) = if (val == "QA") "Current Inventory (Onhand)" 
+								                                       else 
+								                                      if(val == "QD") "Additional Demand by Date" 
+								                                           else 
+								                                       if(val == "QO") "Out of Stocks" 
+								                                         else 
+								                                       if(val == "QP") "On Order by PO" 
+								                                         else 
+								                                        if(val == "QS") "Turn or Combined Sales" 
+								                                           else 
+								                                        if(val == "QT") "Promotiona Sales" 
+								                                           else ""       
+					            var value = payload
+								output application/java  
+							---
+							
+							{
+								"Level" : "SubLine",        
+								"Activity_Code": if(value."080_ZA"."ZA01" != null) activityCode(value."080_ZA"."ZA01") else "",
+								"Quantity" : if(value."080_ZA"."ZA02" != null) value."080_ZA"."ZA02" else "" ,
+								"Unit_of_Measure" : if(value."080_ZA"."ZA03" != null) value."080_ZA"."ZA03" else "" ,
+								"Date_ID_Qualifier" :if(value."080_ZA"."ZA04" != null) dateIdQualifier(value."080_ZA"."ZA04") else "" ,
+								"Date" : if(value."080_ZA"."ZA05" != null) value."080_ZA"."ZA05" as Date else "" ,
+								"Reference_ID": if(value."080_ZA"."ZA06" != null) referenceId(value."080_ZA"."ZA06") else "",
+								"Reference": if(value."080_ZA"."ZA07" != null) (value."080_ZA"."ZA07") else ""
+							}
+					
+					]'/>
+					
+					<set-variable variableName="initial_csv" value='#[%dw 2.0
+					
+					
+					output application/java 
+					---
+					   vars.initial_csv + (vars.subline_segment_csv)
+					
+			
+			       ]'/>
+		    	   
+      </foreach>	
+
+
+
+</foreach>
+		<ee:transform doc:name="Aggregate All CSVs" doc:id="4490dda1-7707-4d53-9220-e391df21f97c" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+				
+output application/csv  separator=",", quoteValues=true
+
+
+---
+vars.initial_csv
+		
+		
+		
+]]></ee:set-payload>
+			
+</ee:message>
+		</ee:transform>
+		 
+		<!-- <ee:transform doc:name="Transform Message" doc:id="2969b9f8-ec9d-4b24-b414-3c9921e89e96" >
+			<ee:message >
+				<ee:set-payload resource="generate_combine_csv.dwl" />
+			</ee:message>
+		</ee:transform> -->
+		<logger level="INFO" doc:name="Logger" doc:id="c5adea25-e6d2-401d-a0bb-5500003ffaa4" message=" Transformed payload :: #[payload]"/>
+		
+		<file:write doc:name="Write" doc:id="3a36cf69-c0d2-409b-8692-9de8a06aab32"  config-ref="File_Config" path="demo_aggregated_cswg_new.csv"/>
+	</flow>
+	
+	
+
+	
+</mule>
